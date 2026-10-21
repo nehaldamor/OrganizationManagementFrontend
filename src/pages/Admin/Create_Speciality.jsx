@@ -1,6 +1,6 @@
 import React from 'react'
 
-const AddOrganizationPage = () => {
+const Create_Speciality = () => {
   return (
     <div>
       
@@ -8,4 +8,4 @@ const AddOrganizationPage = () => {
   )
 }
 
-export default AddOrganizationPage
+export default Create_Speciality

@@ -1,0 +1,56 @@
+import React, { useCallback, useEffect, useState } from "react";
+import axios from "axios";
+import { LoaderCircle, Plus, RefreshCw, Search, UsersRound, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import Sidebar from "../../components/Admin_sideBar";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem("accessToken")}` } });
+const userFromStorage = () => { try { return JSON.parse(localStorage.getItem("user") || "{}"); } catch { return {}; } };
+const message = (error, fallback) => { const value = error.response?.data?.message || error.message || fallback; return Array.isArray(value) ? value.join(", ") : value; };
+
+export default function Teams() {
+  const navigate = useNavigate();
+  const [user] = useState(userFromStorage);
+  const [teams, setTeams] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [organizationUsers, setOrganizationUsers] = useState([]);
+  const [selectedTeam, setSelectedTeam] = useState(null);
+  const [form, setForm] = useState({ name: "", description: "" });
+  const [memberId, setMemberId] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+
+  const unauthorized = useCallback(() => { localStorage.removeItem("accessToken"); localStorage.removeItem("user"); navigate("/", { replace: true }); }, [navigate]);
+  const request = useCallback(async (work) => { try { return await work(); } catch (err) { if (err.response?.status === 401) { unauthorized(); return null; } throw err; } }, [unauthorized]);
+
+  const loadTeams = useCallback(async () => {
+    try { setLoading(true); setError(""); const response = await request(() => axios.get(`${API_BASE_URL}/team`, auth())); if (response) setTeams(Array.isArray(response.data) ? response.data : response.data.data || []); }
+    catch (err) { setError(message(err, "Unable to load teams.")); } finally { setLoading(false); }
+  }, [request]);
+
+  const loadUsers = useCallback(async () => {
+    try { const response = await request(() => axios.get(`${API_BASE_URL}/users?organizationId=${user.organizationId}`, auth())); if (response) setOrganizationUsers(Array.isArray(response.data) ? response.data : response.data.users || response.data.data || []); }
+    catch (err) { setError(message(err, "Unable to load organization users.")); }
+  }, [request, user.organizationId]);
+
+  useEffect(() => { loadTeams(); loadUsers(); }, [loadTeams, loadUsers]);
+
+  const openTeam = async (team) => { try { setSelectedTeam(team); const response = await request(() => axios.get(`${API_BASE_URL}/team/${team.id}/members`, auth())); if (response) setMembers(response.data || []); } catch (err) { setError(message(err, "Unable to load team members.")); } };
+  const saveTeam = async (event) => { event.preventDefault(); try { setSaving(true); setError(""); const response = await request(() => axios.post(`${API_BASE_URL}/team`, { ...form, organizationId: user.organizationId }, auth())); if (response) { setTeams((old) => [response.data, ...old]); setForm({ name: "", description: "" }); setShowForm(false); } } catch (err) { setError(message(err, "Unable to create team.")); } finally { setSaving(false); } };
+  const changeStatus = async (team, status) => { try { const response = await request(() => axios.patch(`${API_BASE_URL}/team/${team.id}/status`, { status }, auth())); if (response) setTeams((old) => old.map((item) => item.id === team.id ? { ...item, status } : item)); } catch (err) { setError(message(err, "Unable to update team status.")); } };
+  const addMember = async (event) => { event.preventDefault(); if (!memberId || !selectedTeam) return; try { const response = await request(() => axios.post(`${API_BASE_URL}/team/${selectedTeam.id}/members`, { userId: memberId }, auth())); if (response) { setMembers((old) => [...old, response.data]); setMemberId(""); } } catch (err) { setError(message(err, "Unable to add member.")); } };
+  const removeMember = async (member) => { try { await request(() => axios.delete(`${API_BASE_URL}/team/${selectedTeam.id}/members/${member.userId}`, auth())); setMembers((old) => old.filter((item) => item.userId !== member.userId)); } catch (err) { setError(message(err, "Unable to remove member.")); } };
+  const visibleTeams = teams.filter((team) => `${team.name} ${team.description || ""}`.toLowerCase().includes(search.toLowerCase()));
+
+  return <div className="min-h-screen bg-white text-slate-900"><div className="flex min-h-screen"><Sidebar user={user} activeNav="Teams" /><main className="min-w-0 flex-1 bg-slate-50 px-4 py-6 sm:px-7 lg:px-10 lg:py-8">
+    <header className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="mb-2 text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">Organization workspace</p><h1 className="text-3xl font-bold tracking-tight text-[#10213e]">Teams</h1><p className="mt-2 text-sm text-slate-500">Create teams and manage the people who belong to them.</p></div><div className="flex gap-2"><button onClick={() => setShowForm((v) => !v)} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><Plus size={17} /> Create team</button><button onClick={loadTeams} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"><RefreshCw size={17} className={loading ? "animate-spin" : ""} /> Refresh</button></div></header>
+    {error && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+    {showForm && <form onSubmit={saveTeam} className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-semibold text-slate-700">Team name<input required minLength={2} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 font-normal outline-none focus:border-blue-500" placeholder="Product team" /></label><label className="text-sm font-semibold text-slate-700">Description<input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 font-normal outline-none focus:border-blue-500" placeholder="Optional description" /></label></div><div className="mt-5 flex justify-end gap-3"><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600">Cancel</button><button disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{saving && <LoaderCircle size={16} className="animate-spin" />} Create team</button></div></form>}
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-5 py-5 sm:px-7"><div><h2 className="text-lg font-bold text-[#10213e]">Your teams</h2><p className="text-sm text-slate-500">{teams.length} total teams</p></div><div className="relative"><Search size={18} className="absolute left-3 top-2.5 text-slate-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search teams..." className="w-64 rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-blue-500" /></div></div>{loading ? <div className="p-16 text-center"><RefreshCw className="mx-auto animate-spin text-blue-600" /><p className="mt-3 text-sm text-slate-500">Loading teams...</p></div> : visibleTeams.length === 0 ? <div className="p-16 text-center text-sm text-slate-500">No teams found.</div> : <div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-6 py-4">Team</th><th className="px-6 py-4">Members</th><th className="px-6 py-4">Status</th><th className="px-6 py-4 text-right">Action</th></tr></thead><tbody className="divide-y divide-slate-100">{visibleTeams.map((team) => <tr key={team.id} className="hover:bg-slate-50/70"><td className="px-6 py-4"><p className="font-semibold text-[#10213e]">{team.name}</p><p className="text-sm text-slate-500">{team.description || "No description"}</p></td><td className="px-6 py-4 text-sm text-slate-600">{team._count?.members ?? 0}</td><td className="px-6 py-4"><select value={team.status} onChange={(e) => changeStatus(team, e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-semibold"><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option></select></td><td className="px-6 py-4 text-right"><button onClick={() => openTeam(team)} className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">Manage members</button></td></tr>)}</tbody></table></div>}</section>
+    {selectedTeam && <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 p-4"><div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-start justify-between"><div><p className="text-sm font-semibold uppercase tracking-wide text-blue-600">Team members</p><h2 className="mt-1 text-2xl font-bold text-[#10213e]">{selectedTeam.name}</h2></div><button onClick={() => setSelectedTeam(null)}><X className="text-slate-400" /></button></div><form onSubmit={addMember} className="mt-6 flex gap-2"><select required value={memberId} onChange={(e) => setMemberId(e.target.value)} className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-3 text-sm"><option value="">Select an organization user</option>{organizationUsers.filter((candidate) => !members.some((member) => member.userId === candidate.id)).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.email}</option>)}</select><button className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white">Add</button></form><div className="mt-5 divide-y divide-slate-100 rounded-xl border border-slate-200">{members.length === 0 ? <p className="p-5 text-sm text-slate-500">No members yet.</p> : members.map((member) => <div key={member.userId} className="flex items-center justify-between p-4"><div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 text-blue-600"><UsersRound size={17} /></div><div><p className="text-sm font-semibold text-slate-800">{member.user?.name}</p><p className="text-xs text-slate-500">{member.user?.email}</p></div></div><button onClick={() => removeMember(member)} className="text-xs font-semibold text-red-600 hover:underline">Remove</button></div>)}</div></div></div>}
+  </main></div></div>;
+}
